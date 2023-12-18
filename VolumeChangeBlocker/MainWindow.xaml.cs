@@ -1,5 +1,6 @@
 ﻿using System.ComponentModel;
 using System.Windows;
+using AudioSwitcher.AudioApi;
 using AudioSwitcher.AudioApi.CoreAudio;
 using MessageBox = System.Windows.MessageBox;
 
@@ -10,16 +11,18 @@ namespace VolumeChangeBlocker;
 /// </summary>
 public partial class MainWindow
 {
-    private string AppName => "Volume change blocker";
-    private readonly CoreAudioDevice _playbackDevice = new CoreAudioController().DefaultPlaybackDevice;
+    private static string AppName => "Volume change blocker";
+    private readonly CoreAudioController _coreAudioController = new ();
+    private CoreAudioDevice? _playbackDevice;
     private readonly NotifyIcon _notifyIcon = new();
     
     public MainWindow()
     {
         InitializeComponent();
         CreateTrayIcon();
+        SetPlaybackDevice();
         UpdateVolumeSlider();
-        PrepareObserver();
+        SubscribeOnDeviceChange();
         DataContext = new { AppName };
     }
 
@@ -33,11 +36,50 @@ public partial class MainWindow
         _notifyIcon.DoubleClick += (_, _) => Show();
     }
 
-    private void PrepareObserver()
+    private void SubscribeOnDeviceChange()
     {
-        var observer = new VolumeObserver();
-        _playbackDevice.VolumeChanged.Subscribe(observer);
-        observer.OnVolumeChanged += () =>
+        var defaultObserver = new EventObserver<DeviceChangedArgs>(() =>
+        {
+            Dispatcher.Invoke(SetPlaybackDevice);
+        });
+        _coreAudioController.AudioDeviceChanged.Subscribe(defaultObserver);
+    }
+
+    private void RangeBase_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    {
+        ChangeVolume(e.NewValue);
+    }
+
+    private void ChangeVolume(double value)
+    {
+        if(_playbackDevice != null)
+            _playbackDevice.Volume = value;
+    }
+
+    private void UpdateVolumeSlider()
+    {
+        VolumeSlider.Value = _playbackDevice?.Volume ?? 0;
+    }
+
+    protected override void OnStateChanged(EventArgs e)
+    {
+        if (WindowState == WindowState.Minimized) Hide();
+        base.OnStateChanged(e);
+    }
+    
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        var result = MessageBox.Show(this, "Do you want to close app?", "Confirmation", MessageBoxButton.YesNo);
+
+        if (result == MessageBoxResult.Yes) return;
+        e.Cancel = true;
+        base.OnClosing(e);
+    }
+
+    private void SetPlaybackDevice()
+    {
+        _playbackDevice = _coreAudioController.DefaultPlaybackDevice;
+        var volumeObserver = new EventObserver<DeviceVolumeChangedArgs>(() =>
         {
             Dispatcher.Invoke(() =>
             {
@@ -51,37 +93,16 @@ public partial class MainWindow
                     UpdateVolumeSlider();
                 }
             });
-        };
+        });
+        _playbackDevice.VolumeChanged.Subscribe(volumeObserver);
+        
+        UpdateVolumeSlider();
+
     }
 
-    private void RangeBase_OnValueChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    ~MainWindow()
     {
-        ChangeVolume(e.NewValue);
-    }
-
-    private void ChangeVolume(double value)
-    {
-        _playbackDevice.Volume = value;
-    }
-
-    private void UpdateVolumeSlider()
-    {
-        VolumeSlider.Value = _playbackDevice.Volume;
-    }
-
-    protected override void OnStateChanged(EventArgs e)
-    {
-        if (WindowState == WindowState.Minimized) Hide();
-
-        base.OnStateChanged(e);
-    }
-    
-    protected override void OnClosing(CancelEventArgs e)
-    {
-        var result = MessageBox.Show(this, "Do you want to close app?", "Confirmation", MessageBoxButton.YesNo);
-
-        if (result == MessageBoxResult.Yes) return;
-        e.Cancel = true;
-        base.OnClosing(e);
+        _playbackDevice?.Dispose();
+        _coreAudioController.Dispose();
     }
 }
