@@ -33,7 +33,11 @@ public partial class MainWindow
         var icon = System.Drawing.Icon.ExtractAssociatedIcon(
             System.Reflection.Assembly.GetEntryAssembly()!.ManifestModule.Name);
         _notifyIcon.Icon = icon;
-        _notifyIcon.DoubleClick += (_, _) => Show();
+        _notifyIcon.DoubleClick += (_, _) =>
+        {
+            Show();
+            WindowState = WindowState.Normal;
+        };
     }
 
     private void SubscribeOnDeviceChange()
